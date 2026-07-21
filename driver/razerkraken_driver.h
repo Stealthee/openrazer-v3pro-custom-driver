@@ -93,6 +93,18 @@
 #define BLACKSHARK_V3_PRO_ULL_ID           0x01
 #define BLACKSHARK_V3_PRO_ANC_CLASS        0x92  /* SET; args=[mode, level]; mode 0=off 1=ANC 0x50=ambient */
 #define BLACKSHARK_V3_PRO_ANC_ID           0x02
+#define BLACKSHARK_V3_PRO_ANC_POLL_CLASS   0x12  /* GET/poll class; on-board ANC
+                                                   * button also pushes state
+                                                   * back on this class (verified
+                                                   * on hardware 2026-07-21:
+                                                   * data[13]=mode (same byte
+                                                   * values as ANC_CLASS SET),
+                                                   * data[14]=level) — not the
+                                                   * 0x92 SET class, matching
+                                                   * how battery/charging push
+                                                   * back on their GET class
+                                                   * (0x21/0x2a) rather than a
+                                                   * separate SET class. */
 #define BLACKSHARK_V3_PRO_ANC_MODE_OFF     0x00
 #define BLACKSHARK_V3_PRO_ANC_MODE_ANC     0x01
 #define BLACKSHARK_V3_PRO_ANC_MODE_AMBIENT 0x50
