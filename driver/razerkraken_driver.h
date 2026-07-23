@@ -92,19 +92,8 @@
 #define BLACKSHARK_V3_PRO_ULL_CLASS        0xdf  /* SET; args=[on/off]; Ultra-Low Latency */
 #define BLACKSHARK_V3_PRO_ULL_ID           0x01
 #define BLACKSHARK_V3_PRO_ANC_CLASS        0x92  /* SET; args=[mode, level]; mode 0=off 1=ANC 0x50=ambient */
+#define BLACKSHARK_V3_PRO_ANC_POLL_CLASS   0x12  /* GET/poll class; the on-board ANC button pushes state back here (data[13]=mode, data[14]=level), not the 0x92 SET class — same pattern as battery/charging (0x21/0x2a). */
 #define BLACKSHARK_V3_PRO_ANC_ID           0x02
-#define BLACKSHARK_V3_PRO_ANC_POLL_CLASS   0x12  /* GET/poll class; on-board ANC
-                                                   * button also pushes state
-                                                   * back on this class (verified
-                                                   * on hardware 2026-07-21:
-                                                   * data[13]=mode (same byte
-                                                   * values as ANC_CLASS SET),
-                                                   * data[14]=level) — not the
-                                                   * 0x92 SET class, matching
-                                                   * how battery/charging push
-                                                   * back on their GET class
-                                                   * (0x21/0x2a) rather than a
-                                                   * separate SET class. */
 #define BLACKSHARK_V3_PRO_ANC_MODE_OFF     0x00
 #define BLACKSHARK_V3_PRO_ANC_MODE_ANC     0x01
 #define BLACKSHARK_V3_PRO_ANC_MODE_AMBIENT 0x50
@@ -207,6 +196,33 @@ struct razer_kraken_device {
     s8 cached_in_call_audio_mix;
     s8 cached_audio_prompts;
     s8 cached_mic_muted;
+    /* Last firmware EQ-slot readback (cls=0x15 GET): eq_query_slot is the slot
+     * index the bands were read from, eq_query_bands the decoded -6..+6 gains. */
+    s8 eq_query_slot;
+    s8 eq_query_bands[10];
+
+    /* Private interrupt-IN URB on ep 0x84. usbhid does not submit the
+     * interrupt-IN URB on kernel 7.x (the hid_hw_open -> usbhid_open path is
+     * decoupled), so we drive ep 0x84 ourselves to receive the firmware's
+     * spontaneous pushes and its query replies. Without this the whole
+     * request/reply and on-board-push telemetry silently stalls. */
+    struct urb  *intr_urb;
+    u8          *intr_buf;
+    dma_addr_t   intr_dma;
+    /* On -EPROTO (data-toggle mismatch after hot-plug) the callback defers
+     * usb_clear_halt + resubmit to this work (can't run in atomic context). */
+    struct work_struct intr_recover_work;
+    atomic_t intr_eproto_count;   /* consecutive -EPROTO count, reset on success */
+    /* Periodic RF_WAKE (Output Report 5, [0x05,0x00]) keep-alive. Sending it
+     * ~every 3.5s is what keeps the dongle's RF telemetry channel from going
+     * idle and dropping pushes over a long session. */
+    struct delayed_work rf_wake_work;
+    /* Re-runs the handshake + battery query after a cls=0x20 RF-reconnect
+     * event (headset was off/asleep/out of range and just reconnected).
+     * Needs process context (handshake + battery query can sleep and take
+     * dev->lock), so the cls=0x20 push handler — which runs in softirq/URB
+     * completion context — just schedules this instead of querying inline. */
+    struct work_struct battery_requery_work;
 };
 
 union razer_kraken_effect_byte {
