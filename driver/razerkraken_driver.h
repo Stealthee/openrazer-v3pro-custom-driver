@@ -6,6 +6,8 @@
 #ifndef __HID_RAZER_KRAKEN_H
 #define __HID_RAZER_KRAKEN_H
 
+#include "razercommon.h"
+
 #define USB_DEVICE_ID_RAZER_KRAKEN_CLASSIC 0x0501
 #define USB_DEVICE_ID_RAZER_KRAKEN 0x0504 // Codename Rainie
 #define USB_DEVICE_ID_RAZER_KRAKEN_CLASSIC_ALT 0x0506
@@ -250,6 +252,13 @@ struct razer_kraken_device {
      * retries a bounded number of times until pushed_battery_pct is filled. */
     struct delayed_work battery_query_work;
     u8 battery_query_tries;
+
+    /* Battery exposed to userspace as a Linux power_supply device so UPower
+     * and the desktop battery tray discover it. Uses the generic razercommon
+     * helper (push model): the headset's raw_event/URB push path feeds it via
+     * razer_power_supply_set(). battery.psy is NULL until registered (and stays
+     * NULL on non-battery PIDs), which the push path guards on. */
+    struct razer_power_supply battery;   /* generic helper (push model) */
 };
 
 union razer_kraken_effect_byte {

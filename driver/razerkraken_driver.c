@@ -11,6 +11,7 @@
 #include <linux/hid.h>
 #include <linux/random.h>
 #include <linux/completion.h>
+#include <linux/power_supply.h>
 
 #include "razerkraken_driver.h"
 #include "razercommon.h"
@@ -2334,6 +2335,17 @@ static inline bool razer_blackshark_is_v3pro(u16 pid)
            pid == USB_DEVICE_ID_RAZER_BLACKSHARK_V3_PRO_WIRED;
 }
 
+/* Every V3-family headset carries a battery in the headset itself. The "(Wired)"
+ * PIDs (0x0576 Pro, 0x0579 V3) are NOT battery-less models — they are the same
+ * headset enumerating over a USB-C cable instead of the 2.4GHz dongle, so they
+ * still have (and charge) a battery. Battery capability therefore tracks the
+ * whole V3 family. A mode with no live value yet reports PRESENT=0 and the tray
+ * hides it, so covering all four never creates a phantom entry. */
+static inline bool razer_blackshark_has_battery(u16 pid)
+{
+    return razer_blackshark_is_v3(pid);
+}
+
 /*
  * Cache one 64-byte V3/V3 Pro frame into device state. Shared by raw_event()
  * (when the HID stack delivers a report, e.g. wired) and the private ep 0x84
@@ -2495,6 +2507,23 @@ static void razer_blackshark_v3_cache(struct razer_kraken_device *device, u8 *da
             break;
         default:
             break;
+        }
+
+        /* A battery / charging / link-state push changed what the tray should
+         * show — push it into the shared helper, which dedups and pokes UPower
+         * only on a real change. Guarded: battery.psy is NULL until registered
+         * (and on non-battery PIDs, which run this too via raw_event).
+         * razer_power_supply_set() is spin_lock_irqsave-safe in URB/softirq. */
+        if (device->battery.psy &&
+            (data[10] == 0x21 || data[10] == 0x2a || data[10] == 0x20)) {
+            s8 pct = device->pushed_battery_pct;
+            s8 chg = device->pushed_charging;
+            int status = (pct < 0)    ? POWER_SUPPLY_STATUS_UNKNOWN :
+                         (chg > 0)    ? POWER_SUPPLY_STATUS_CHARGING :
+                         (pct >= 100) ? POWER_SUPPLY_STATUS_FULL :
+                         POWER_SUPPLY_STATUS_DISCHARGING;
+            razer_power_supply_set(&device->battery, (pct >= 0) ? pct : -1,
+                                   status, pct >= 0);
         }
     }
 
@@ -2746,6 +2775,16 @@ static int razer_kraken_probe(struct hid_device *hdev, const struct hid_device_i
 
     dev_set_drvdata(&hdev->dev, dev);
 
+    /* Expose the battery to UPower / the desktop tray. Register before the ep
+     * 0x84 URB goes live below so razer_power_supply_set() from an early push
+     * has a valid psy. is_v3pro() matches both the dongle (0x0577) and cabled
+     * (0x0576) Pro, so a cabled Pro still labels itself "Pro", not plain V3. */
+    if (razer_blackshark_has_battery(dev->usb_pid))
+        razer_power_supply_register(&dev->battery, &hdev->dev, dev,
+                                    razer_blackshark_is_v3pro(dev->usb_pid)
+                                    ? "Razer BlackShark V3 Pro" : "Razer BlackShark V3",
+                                    NULL, 0);
+
     /* Bring up the private ep 0x84 URB BEFORE hid_hw_start so it is already on
      * the endpoint when usbhid_start's SET_IDLE activates it (the dongle
      * starts sending on ep 0x84 ~2.7ms after that SET_IDLE). */
@@ -2826,6 +2865,7 @@ exit_free:
             usb_free_coherent(usb_dev, RAZER_BLACKSHARK_REPORT_LEN,
                               dev->intr_buf, dev->intr_dma);
     }
+    razer_power_supply_unregister(&dev->battery);
     kfree(dev);
     return retval;
 }
@@ -2937,6 +2977,7 @@ static void razer_kraken_disconnect(struct hid_device *hdev)
     }
 
     hid_hw_stop(hdev);
+    razer_power_supply_unregister(&dev->battery);
     kfree(dev);
     hid_info(hdev, "Razer Device disconnected\n");
 }
