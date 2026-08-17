@@ -1400,6 +1400,36 @@ static ssize_t razer_attr_read_mic_eq_preset(struct device *dev, struct device_a
 }
 
 /*
+ * indicator_led write: 0..2 (ConnectionStatus, BatteryStatus, BatteryWarningOnly).
+ * Dongle-only — no LED on the wired variant.
+ */
+static ssize_t razer_attr_write_indicator_led(struct device *dev, struct device_attribute *attr, const char *buf, size_t count)
+{
+    struct razer_kraken_device *device = dev_get_drvdata(dev);
+    u8 cmdbuf[RAZER_BLACKSHARK_REPORT_LEN];
+    unsigned long val;
+
+    if (kstrtoul(buf, 10, &val))
+        return -EINVAL;
+    if (val > 2) val = 2;
+
+    razer_blackshark_build_set(cmdbuf, BLACKSHARK_SET_INDICATOR_LED, (u8)val,
+                               razer_blackshark_set_dir(device->usb_pid));
+    mutex_lock(&device->lock);
+    razer_blackshark_send_cmd(device, cmdbuf);
+    device->cached_v3_indicator_led = (s8)val;
+    mutex_unlock(&device->lock);
+
+    return count;
+}
+
+static ssize_t razer_attr_read_indicator_led(struct device *dev, struct device_attribute *attr, char *buf)
+{
+    struct razer_kraken_device *device = dev_get_drvdata(dev);
+    return sprintf(buf, "%d\n", device->cached_v3_indicator_led);
+}
+
+/*
  * mic_eq write format: 10 space-separated band gains -6..+6 dB.
  * Frequencies: 31Hz 63Hz 125Hz 250Hz 500Hz 1kHz 2kHz 4kHz 8kHz 16kHz.
  */
@@ -2223,6 +2253,7 @@ static ssize_t razer_attr_read_mic_mute(struct device *dev, struct device_attrib
     return sprintf(buf, "%d\n", device->cached_mic_muted);
 }
 static DEVICE_ATTR(mic_eq_preset,           0660, razer_attr_read_mic_eq_preset,           razer_attr_write_mic_eq_preset);
+static DEVICE_ATTR(indicator_led,           0660, razer_attr_read_indicator_led,           razer_attr_write_indicator_led);
 static DEVICE_ATTR(mic_mute,                0440, razer_attr_read_mic_mute,                NULL);
 static DEVICE_ATTR(eq_slot,                 0660, razer_attr_read_eq_slot,                 razer_attr_write_eq_slot);
 static DEVICE_ATTR(audio_function_button,   0660, razer_attr_read_audio_function_button,   razer_attr_write_audio_function_button);
@@ -2273,6 +2304,7 @@ static void razer_kraken_init(struct razer_kraken_device *dev, struct usb_interf
     dev->cached_v3_sidetone        = -1;
     dev->cached_v3_mic_eq_preset   = -1;
     dev->cached_v3_fn_button       = -1;
+    dev->cached_v3_indicator_led   = -1;
     dev->cached_v3pro_thx          = -1;
     dev->cached_v3pro_anc_mode     = -1;
     dev->cached_v3pro_anc_level    = -1;
@@ -2448,9 +2480,16 @@ static void razer_blackshark_v3_cache(struct razer_kraken_device *device, u8 *da
                 device->cached_v3pro_thx = data[13];
             }
             break;
-        case BLACKSHARK_PARAM_MIC_EQ_PRESET: /* 0x16 */
-            if (data[13] != 0xff)
-                device->cached_v3_mic_eq_preset = data[13];
+        case BLACKSHARK_PARAM_MIC_EQ_PRESET: /* 0x16 — read-only GET-preset
+                    * query. Real Synapse fires this (and its 0x17 GET-bands
+                    * companion) as a fixed pair after every SET_MIC_EQ_PRESET
+                    * /SET_MIC_EQ_DATA write (0x96/0x97), so this also lands
+                    * as an echo of our own writes, not just spontaneous
+                    * pushes. data[13] is the raw device code (0x20+idx);
+                    * store the same 0..3 index the write handler and sysfs
+                    * reader use, not the raw byte. */
+            if (data[13] >= 0x20 && data[13] <= 0x23)
+                device->cached_v3_mic_eq_preset = data[13] - 0x20;
             break;
         case BLACKSHARK_PARAM_MIC_STATUS: /* 0x55 mic mute */
             if (data[13] <= 1)
@@ -2760,6 +2799,8 @@ static int razer_kraken_probe(struct hid_device *hdev, const struct hid_device_i
             CREATE_DEVICE_FILE(&hdev->dev, &dev_attr_audio_prompts);
             CREATE_DEVICE_FILE(&hdev->dev, &dev_attr_charge_level);
             CREATE_DEVICE_FILE(&hdev->dev, &dev_attr_charge_status);
+            if (dev->usb_pid != USB_DEVICE_ID_RAZER_BLACKSHARK_V3_WIRED)
+                CREATE_DEVICE_FILE(&hdev->dev, &dev_attr_indicator_led);  // Dongle only — no LED when wired
             break;
         case USB_DEVICE_ID_RAZER_BLACKSHARK_V3_PRO_WIRED:
         case USB_DEVICE_ID_RAZER_BLACKSHARK_V3_PRO:
@@ -2779,6 +2820,8 @@ static int razer_kraken_probe(struct hid_device *hdev, const struct hid_device_i
             CREATE_DEVICE_FILE(&hdev->dev, &dev_attr_game_chat_balance);
             CREATE_DEVICE_FILE(&hdev->dev, &dev_attr_in_call_audio_mix);
             CREATE_DEVICE_FILE(&hdev->dev, &dev_attr_audio_prompts);
+            if (dev->usb_pid != USB_DEVICE_ID_RAZER_BLACKSHARK_V3_PRO_WIRED)
+                CREATE_DEVICE_FILE(&hdev->dev, &dev_attr_indicator_led);  // Dongle only — no LED when wired
             break;
         }
     }
@@ -2935,6 +2978,8 @@ static void razer_kraken_disconnect(struct hid_device *hdev)
             device_remove_file(&hdev->dev, &dev_attr_audio_prompts);
             device_remove_file(&hdev->dev, &dev_attr_charge_level);
             device_remove_file(&hdev->dev, &dev_attr_charge_status);
+            if (dev->usb_pid != USB_DEVICE_ID_RAZER_BLACKSHARK_V3_WIRED)
+                device_remove_file(&hdev->dev, &dev_attr_indicator_led);
             break;
         case USB_DEVICE_ID_RAZER_BLACKSHARK_V3_PRO_WIRED:
         case USB_DEVICE_ID_RAZER_BLACKSHARK_V3_PRO:
@@ -2954,6 +2999,8 @@ static void razer_kraken_disconnect(struct hid_device *hdev)
             device_remove_file(&hdev->dev, &dev_attr_game_chat_balance);
             device_remove_file(&hdev->dev, &dev_attr_in_call_audio_mix);
             device_remove_file(&hdev->dev, &dev_attr_audio_prompts);
+            if (dev->usb_pid != USB_DEVICE_ID_RAZER_BLACKSHARK_V3_PRO_WIRED)
+                device_remove_file(&hdev->dev, &dev_attr_indicator_led);
             break;
         }
     }

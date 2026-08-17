@@ -64,14 +64,31 @@
 
 /* SET commands (verified from pcap captures) */
 #define BLACKSHARK_SET_EQ                  0x95  /* Headphone EQ data — buf[14..23]=10 bands, buf[13]=profile_idx */
-#define BLACKSHARK_SET_MIC_EQ_PRESET       0x96  /* Mic EQ preset — buf[13]: 0x20=Default 0x21=Esports 0x22=Broadcast 0x23=MicBoost */
-#define BLACKSHARK_SET_MIC_EQ_DATA         0x97  /* Mic EQ band data — buf[13..22]=10 bands sign-magnitude */
+/*
+ * Mic EQ preset/data DO follow the GET|0x80 convention every other pair in
+ * this file follows (0x15/0x95, 0x65/0xe5, 0x6a/0xea, ...) — 0x96/0x97 are
+ * the real SET classes. A 2026-08-16 capture (defaultesportsbroadcastflat
+ * .pcapng) briefly misidentified the bare GET classes 0x16/0x17 as the
+ * writes and this got changed to match, which was wrong: a follow-up
+ * 2026-08-17 Windows session first confirmed with a ground-truth audio A/B
+ * test that genuine Synapse presets DO change the mic sound, then re-
+ * captured the full protocol (checksum-verified) and found 0x16/0x17
+ * (cmd=0x00, all-zero args) are a fixed read-only GET-preset/GET-bands
+ * companion pair that fires after every real write — not the write itself.
+ * Sending bare 0x16/0x17 as if they were writes is a well-formed,
+ * checksum-valid no-op: the device acks it and changes nothing, which is
+ * exactly the "byte-identical capture, zero audible difference" symptom
+ * that prompted this recapture. Restored to 0x96/0x97.
+ */
+#define BLACKSHARK_SET_MIC_EQ_PRESET       0x96  /* buf[13]: 0x20=Default 0x21=MicBoost 0x22=Broadcast 0x23=Esports */
+#define BLACKSHARK_SET_MIC_EQ_DATA         0x97  /* buf[13..22]=10 bands sign-magnitude */
 #define BLACKSHARK_SET_SIDETONE_INIT       0x98  /* Sidetone enable — buf[13]=0x01 */
 #define BLACKSHARK_SET_SIDETONE_LEVEL      0x99  /* Sidetone level — buf[13]=0x00..0x0f (0..15) */
 #define BLACKSHARK_SET_EQ_APPLY            0xe0  /* Headphone EQ apply — profile-specific */
 #define BLACKSHARK_SET_EQ_BEGIN            0xe1  /* Headphone EQ begin/end — buf[13]=0x01 begin, 0x02 end */
 #define BLACKSHARK_SET_EQ_COMMIT           0xeb  /* Headphone EQ commit */
 #define BLACKSHARK_SET_FN_BUTTON           0xea  /* Audio FN button mode — buf[13]: 0x00=GameChat (default), 0x01=Sidetone, 0x02=Footsteps, 0x03=BluetoothVolume. All four verified on-device 2026-05-03 after widening the write_audio_function_button clamp from 1..2 to 0..255 — the earlier "0x00/0x03 alias to 0x01" reading was the driver returning -EINVAL before the bytes ever reached the device. */
+#define BLACKSHARK_SET_INDICATOR_LED       0xe6  /* Dongle indicator LED mode — buf[13]: 0x00=ConnectionStatus, 0x01=BatteryStatus, 0x02=BatteryWarningOnly. Verified byte-for-byte (CRC included) from a Windows Synapse capture, 2026-08-16. Wireless dongle only — no LED on the wired variant. */
 
 /* ---- BlackShark V3 Pro (PID 0x0577) command set ----
  *
@@ -208,6 +225,7 @@ struct razer_kraken_device {
     s8 cached_v3_sidetone;
     s8 cached_v3_mic_eq_preset;
     s8 cached_v3_fn_button;
+    s8 cached_v3_indicator_led;
     s8 cached_v3pro_thx;
     s8 cached_v3pro_anc_mode;
     s8 cached_v3pro_anc_level;
