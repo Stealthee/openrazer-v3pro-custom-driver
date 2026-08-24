@@ -11,6 +11,7 @@
 #include <linux/hid.h>
 #include <linux/random.h>
 #include <linux/completion.h>
+#include <linux/string.h>
 
 #include "razerkraken_driver.h"
 #include "razercommon.h"
@@ -1036,7 +1037,7 @@ static ssize_t razer_attr_read_device_serial(struct device *dev, struct device_a
         device->usb_pid == USB_DEVICE_ID_RAZER_BLACKSHARK_V3_PRO_WIRED) {
         /* V3 Pro serial query path is not yet decoded — return a placeholder. */
         if (device->serial[0] == '\0')
-            strncpy(device->serial, "BS_V3PRO_000000", sizeof(device->serial) - 1);
+            strscpy(device->serial, "BS_V3PRO_000000", sizeof(device->serial));
         return sprintf(buf, "%s\n", device->serial);
     }
 
@@ -1057,7 +1058,7 @@ static ssize_t razer_attr_read_device_serial(struct device *dev, struct device_a
                 memcpy(device->serial, &device->data[13], slen);
                 device->serial[slen] = '\0';
             } else {
-                strncpy(device->serial, "BS000000000000", sizeof(device->serial) - 1);
+                strscpy(device->serial, "BS000000000000", sizeof(device->serial));
             }
             mutex_unlock(&device->lock);
         }
