@@ -1804,6 +1804,7 @@ static ssize_t razer_attr_read_charge_status(struct device *dev, struct device_a
 static void razer_blackshark_v3_prime_caches(struct razer_kraken_device *device)
 {
     static const u8 getters[] = {
+        BLACKSHARK_PARAM_INIT,              /* 0x02: firmware version */
         BLACKSHARK_PARAM_SIDETONE_VOLUME,   /* 0x19 */
         BLACKSHARK_PARAM_AUTO_POWER_OFF,    /* 0x2c */
         BLACKSHARK_PARAM_ULTRA_LOW_LATENCY, /* 0x5f */
