@@ -2515,8 +2515,15 @@ static void razer_blackshark_v3_cache(struct razer_kraken_device *device, u8 *da
                                      * (seen 2026-11-02 on 1532:0577 via
                                      * usbmon; Synapse reports 1.3.3_r1).
                                      * Answered before RF link-up, so it may
-                                     * be the dongle's version. */
-            if (data[11] == 0x01 && data[12] >= 3 && data[12] <= 4 &&
+                                     * be the dongle's version.
+                                     * The handshake's dir=0x00 GET answers
+                                     * cnt=4; the prime's dir=0x80 GET answers
+                                     * cnt=8, the version twice (01 03 03 00
+                                     * 01 03 03 00 on fw 1.3.3, likely dongle
+                                     * + headset). Rejecting cnt=8 left only
+                                     * the racy probe-time reply, so the
+                                     * version read v1.0 on most connects. */
+            if (data[11] == 0x01 && data[12] >= 3 && data[12] <= 8 &&
                 data[13] != 0xff && (data[13] | data[14] | data[15])) {
                 memcpy(device->v3_fw, &data[13], 4);
                 device->v3_fw_valid = true;
