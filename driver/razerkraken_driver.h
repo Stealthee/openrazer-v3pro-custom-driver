@@ -58,6 +58,8 @@
 #define BLACKSHARK_PARAM_AUDIO_PROMPTS_GET 0x66  /* GET; cnt=1 [on/off]. Pair: SET 0xe5 sub=0x02 (cls byte multiplexes by sub). */
 #define BLACKSHARK_PARAM_AUDIO_FN_GET      0x6a  /* GET; cnt=1 [mode 0..3]. Pair: SET 0xea. */
 #define BLACKSHARK_PARAM_THX               0x9e  /* GET; cnt=1 [0=stereo, 1=THX-spatial] */
+#define BLACKSHARK_PARAM_THX_GET_PRO       0x1e  /* V3 Pro GET; cnt=1 [0/1]. 0x9e is the SET and always answers 0 there (verified 2026-11-24). */
+#define BLACKSHARK_PARAM_PROMPTS_GET_PRO   0x65  /* V3 Pro GET with arg [0x00]; cnt=2 [0x00, on]. Mirrors SET 0xe5 sub=0x02 args (verified 2026-11-24). */
 #define BLACKSHARK_PARAM_AUDIO_PROMPTS     0xe5  /* GET (V3 wireless variant — note 0xe5 cls is multiplexed: sub=0x01 = GAME_CHAT_BALANCE, sub=0x02 = AUDIO_PROMPTS). */
 #define BLACKSHARK_PARAM_AUDIO_FN_BUTTON   0xea  /* GET; cnt=1 [mode 0..3] */
 #define BLACKSHARK_PARAM_EQ                BLACKSHARK_PARAM_EQ_BANDS  /* legacy alias */

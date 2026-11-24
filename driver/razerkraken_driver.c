@@ -1820,6 +1820,8 @@ static void razer_blackshark_v3_prime_caches(struct razer_kraken_device *device)
     };
     u8 cmdbuf[RAZER_BLACKSHARK_REPORT_LEN];
     bool opened;
+    bool pro = device->usb_pid == USB_DEVICE_ID_RAZER_BLACKSHARK_V3_PRO ||
+               device->usb_pid == USB_DEVICE_ID_RAZER_BLACKSHARK_V3_PRO_WIRED;
     int i;
 
     /*
@@ -1836,7 +1838,33 @@ static void razer_blackshark_v3_prime_caches(struct razer_kraken_device *device)
         hid_warn(device->hdev, "blackshark: prime: hid_hw_open failed; replies may be missed\n");
 
     for (i = 0; i < (int)ARRAY_SIZE(getters); i++) {
-        razer_blackshark_v3pro_build(cmdbuf, getters[i], 0x00, NULL, 0);
+        u8 cls = getters[i];
+        static const u8 sel0[1] = { 0x00 };
+        const u8 *args = NULL;
+        u8 nargs = 0;
+
+        /*
+         * V3 Pro read-back classes, checked on a live 0577 dongle 2026-11-24
+         * by setting each value and reading it back:
+         *  - THX answers on 0x1e (the setter 0x9e minus 0x80, as for every
+         *    other setting). 0x9e itself always answers 0.
+         *  - 0x66 always answers 0. Audio prompts read back on 0x65, whose
+         *    first arg selects the sub-setting (0x00 = prompts); without it
+         *    the firmware reuses whatever byte the previous frame left there
+         *    and answers [junk, 0xff]. On the Pro, 0x65 is not game/chat.
+         * The plain V3 keeps its original classes (not re-verified here).
+         */
+        if (pro) {
+            if (cls == BLACKSHARK_PARAM_THX)
+                cls = BLACKSHARK_PARAM_THX_GET_PRO;
+            else if (cls == BLACKSHARK_PARAM_AUDIO_PROMPTS_GET)
+                continue;
+            else if (cls == BLACKSHARK_PARAM_PROMPTS_GET_PRO) {
+                args = sel0;
+                nargs = sizeof(sel0);
+            }
+        }
+        razer_blackshark_v3pro_build(cmdbuf, cls, 0x00, args, nargs);
         mutex_lock(&device->lock);
         razer_blackshark_send_cmd(device, cmdbuf);
         mutex_unlock(&device->lock);
@@ -2500,8 +2528,17 @@ static void razer_blackshark_v3_cache(struct razer_kraken_device *device, u8 *da
                 device->cached_v3pro_sidetone = data[13];
             }
             break;
-        case BLACKSHARK_PARAM_GAME_CHAT_BAL_PRO: /* 0x5c */
         case BLACKSHARK_PARAM_GAME_CHAT_BAL_V3:  /* 0x65 */
+            if (razer_blackshark_is_v3pro(device->usb_pid)) {
+                /* On the Pro this is audio prompts: [selector 0x00, on]. Its
+                 * data[13] is the selector, never a balance, and used to
+                 * overwrite the real 0x5c value with 0 or junk at connect. */
+                if (data[12] >= 2 && data[13] == 0x00 && data[14] <= 1)
+                    device->cached_audio_prompts = data[14];
+                break;
+            }
+            fallthrough;
+        case BLACKSHARK_PARAM_GAME_CHAT_BAL_PRO: /* 0x5c */
             if (data[13] != 0xff)
                 device->cached_game_chat_balance = data[13];
             break;
@@ -2523,7 +2560,15 @@ static void razer_blackshark_v3_cache(struct razer_kraken_device *device, u8 *da
             if (data[13] <= 3)
                 device->cached_v3_fn_button = data[13];
             break;
+        case BLACKSHARK_PARAM_THX_GET_PRO: /* 0x1e, V3 Pro THX read-back */
+            if (razer_blackshark_is_v3pro(device->usb_pid) && data[13] <= 1)
+                device->cached_v3pro_thx = data[13];
+            break;
         case BLACKSHARK_PARAM_THX: /* 0x9e */
+            /* On the Pro, 0x9e is only ever the SET's echo and always says 0;
+             * the write path stores the value it sent. */
+            if (razer_blackshark_is_v3pro(device->usb_pid))
+                break;
             if (data[13] <= 1) {
                 device->cached_v3_thx = data[13];
                 device->cached_v3pro_thx = data[13];
